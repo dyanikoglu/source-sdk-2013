@@ -6,9 +6,7 @@
 
 #include "cbase.h"
 #include "player.h"
-#include "gamerules.h"
 #include "soundenvelope.h"
-#include "engine/IEngineSound.h"
 #include "physics.h"
 #include "in_buttons.h"
 #include "soundent.h"
@@ -149,9 +147,9 @@ public:
 			// See if it's a grabbable physics prop
 			if ( FClassnameIs( pEntity, "prop_physics" ) )
 			{
-				CPhysicsProp *pPhysProp = dynamic_cast<CPhysicsProp *>(pEntity);
-				if ( pPhysProp != NULL )
-					return pPhysProp->CanBePickedUpByPhyscannon();
+				CPhysicsProp *pPhysPropInner = dynamic_cast<CPhysicsProp *>(pEntity);
+				if ( pPhysPropInner != NULL )
+					return pPhysPropInner->CanBePickedUpByPhyscannon();
 
 				// Somehow had a classname that didn't match the class!
 				Assert(0);
@@ -280,9 +278,8 @@ void UTIL_PhyscannonTraceHull( const Vector &vecAbsStart, const Vector &vecAbsEn
 static void MatrixOrthogonalize( matrix3x4_t &matrix, int column )
 {
 	Vector columns[3];
-	int i;
 
-	for ( i = 0; i < 3; i++ )
+	for ( int i = 0; i < 3; i++ )
 	{
 		MatrixGetColumn( matrix, i, columns[i] );
 	}
@@ -418,7 +415,7 @@ static void ComputePlayerMatrix( CBasePlayer *pPlayer, matrix3x4_t &out )
 
 	float feet = pPlayer->GetAbsOrigin().z + pPlayer->WorldAlignMins().z;
 	float eyes = origin.z;
-	float zoffset = 0;
+	float zoffset;
 	// moving up (negative pitch is up)
 	if ( angles.x < 0 )
 	{
@@ -491,7 +488,6 @@ private:
 	void ComputeMaxSpeed( CBaseEntity *pEntity, IPhysicsObject *pPhysics );
 
 	game_shadowcontrol_params_t	m_shadow;
-	float			m_timeToArrive;
 	float			m_errorTime;
 	float			m_error;
 	float			m_contactAmount;
@@ -524,7 +520,6 @@ BEGIN_SIMPLE_DATADESC( CGrabController )
 
 	DEFINE_EMBEDDED( m_shadow ),
 
-	DEFINE_FIELD( m_timeToArrive,		FIELD_FLOAT ),
 	DEFINE_FIELD( m_errorTime,			FIELD_FLOAT ),
 	DEFINE_FIELD( m_error,				FIELD_FLOAT ),
 	DEFINE_FIELD( m_contactAmount,		FIELD_FLOAT ),
@@ -586,8 +581,6 @@ void CGrabController::SetTargetPosition( const Vector &target, const QAngle &tar
 {
 	m_shadow.targetPosition = target;
 	m_shadow.targetRotation = targetOrientation;
-
-	m_timeToArrive = gpGlobals->frametime;
 
 	CBaseEntity *pAttached = GetAttached();
 	if ( pAttached )
@@ -760,7 +753,7 @@ void CGrabController::AttachEntity( CBasePlayer *pPlayer, CBaseEntity *pEntity, 
 	int count = pEntity->VPhysicsGetObjectList( pList, ARRAYSIZE(pList) );
 	m_flLoadWeight = 0;
 	float damping = 10;
-	float flFactor = count / 7.5f;
+	float flFactor = static_cast<float>(count) / 7.5f;
 	if ( flFactor < 1.0f )
 	{
 		flFactor = 1.0f;
@@ -862,7 +855,7 @@ void CGrabController::DetachEntity( bool bClearVelocity )
 			}
 			else
 			{
-				ClampPhysicsVelocity( pPhys, hl2_normspeed.GetFloat() * 1.5f, 2.0f * 360.0f );
+				ClampPhysicsVelocity( pPhys, hl2_normspeed.GetFloat() * 4.0f, 2.0f * 360.0f );
 			}
 
 		}
@@ -903,7 +896,7 @@ IMotionEvent::simresult_e CGrabController::Simulate( IPhysicsMotionController *p
 		m_contactAmount = Approach( 1.0f, m_contactAmount, deltaTime*2.0f );
 	}
 	shadowParams.maxAngular = m_shadow.maxAngular * m_contactAmount * m_contactAmount * m_contactAmount;
-	m_timeToArrive = pObject->ComputeShadowControl( shadowParams, m_timeToArrive, deltaTime );
+	pObject->ComputeShadowControl( shadowParams, 0.0f, deltaTime );
 	
 	// Slide along the current contact points to fix bouncing problems
 	Vector velocity;
@@ -924,7 +917,7 @@ float CGrabController::GetSavedMass( IPhysicsObject *pObject )
 	CBaseEntity *pHeld = m_attachedEntity;
 	if ( pHeld )
 	{
-		if ( pObject->GetGameData() == (void*)pHeld )
+		if ( pObject->GetGameData() == static_cast<void*>(pHeld) )
 		{
 			IPhysicsObject *pList[VPHYSICS_MAX_OBJECT_LIST_COUNT];
 			int count = pHeld->VPhysicsGetObjectList( pList, ARRAYSIZE(pList) );
@@ -1024,7 +1017,7 @@ void CPlayerPickupController::Init( CBasePlayer *pPlayer, CBaseEntity *pObject )
 		}
 	}
 
-	CHL2_Player *pOwner = (CHL2_Player *)ToBasePlayer( pPlayer );
+	CHL2_Player *pOwner = static_cast<CHL2_Player*>(ToBasePlayer(pPlayer));
 	if ( pOwner )
 	{
 		pOwner->EnableSprint( false );
@@ -1049,7 +1042,7 @@ void CPlayerPickupController::Init( CBasePlayer *pPlayer, CBaseEntity *pObject )
 	m_grabController.AttachEntity( pPlayer, pObject, pPhysics, false, vec3_origin, false );
 	// NVNT apply a downward force to simulate the mass of the held object.
 #if defined( WIN32 ) && !defined( _X360 )
-	HapticSetConstantForce(m_pPlayer,clamp(m_grabController.GetLoadWeight()*0.1,1,6)*Vector(0,-1,0));
+	HapticSetConstantForce(m_pPlayer,clamp(m_grabController.GetLoadWeight()*0.1f,1,6)*Vector(0,-1,0));
 #endif
 	
 	m_pPlayer->m_Local.m_iHideHUD |= HIDEHUD_WEAPONSELECTION;
@@ -1084,7 +1077,7 @@ void CPlayerPickupController::Shutdown( bool bThrown )
 
 	if ( m_pPlayer )
 	{
-		CHL2_Player *pOwner = (CHL2_Player *)ToBasePlayer( m_pPlayer );
+		CHL2_Player *pOwner = static_cast<CHL2_Player*>(ToBasePlayer(m_pPlayer));
 		if ( pOwner )
 		{
 			pOwner->EnableSprint( true );
@@ -1180,7 +1173,8 @@ void PlayerPickupObject( CBasePlayer *pPlayer, CBaseEntity *pObject )
 	if ( pObject->VPhysicsGetObject() == NULL )
 		 return;
 
-	CPlayerPickupController *pController = (CPlayerPickupController *)CBaseEntity::Create( "player_pickup", pObject->GetAbsOrigin(), vec3_angle, pPlayer );
+	CPlayerPickupController *pController = static_cast<CPlayerPickupController*>(CBaseEntity::Create("player_pickup", pObject->GetAbsOrigin(), vec3_angle,
+	                                                                                                 pPlayer));
 	
 	if ( !pController )
 		return;
@@ -1244,8 +1238,6 @@ public:
 	bool	Deploy( void );
 
 	bool	HasAnyAmmo( void ) { return true; }
-
-	void	InputBecomeMegaCannon( inputdata_t &inputdata );
 
 	void	BeginUpgrade();
 
@@ -1978,9 +1970,6 @@ void CWeaponPhysCannon::ApplyVelocityBasedForce( CBaseEntity *pEntity, const Vec
 	}
 	else
 	{
-		Vector	vTempVel;
-		AngularImpulse vTempAVel;
-
 		ragdoll_t *pRagdollPhys = pRagdoll->GetRagdoll( );
 		for ( int j = 0; j < pRagdollPhys->listCount; ++j )
 		{
@@ -2024,10 +2013,10 @@ void CWeaponPhysCannon::PuntRagdoll( CBaseEntity *pEntity, const Vector &vecForw
 		CRagdollProp *pRagdoll = dynamic_cast<CRagdollProp*>( pEntity );
 		ragdoll_t *pRagdollPhys = pRagdoll->GetRagdoll( );
 
-		int j;
-		for ( j = 0; j < pRagdollPhys->listCount; ++j )
+		for ( int j = 0; j < pRagdollPhys->listCount; ++j )
 		{
-			pRagdollPhys->list[j].pObject->AddVelocity( &vVel, NULL ); 
+			// TODO(doga): See if aVel is working well
+			pRagdollPhys->list[j].pObject->AddVelocity( &vVel, &aVel ); 
 		}
 	}
 	
@@ -2398,7 +2387,7 @@ bool CWeaponPhysCannon::AttachObject( CBaseEntity *pObject, const Vector &vPosit
 	if ( !pPhysics )
 		return false;
 
-	CHL2_Player *pOwner = (CHL2_Player *)ToBasePlayer( GetOwner() );
+	CHL2_Player *pOwner = static_cast<CHL2_Player*>(ToBasePlayer(GetOwner()));
 
 	m_bActive = true;
 	if( pOwner )
@@ -2414,6 +2403,9 @@ bool CWeaponPhysCannon::AttachObject( CBaseEntity *pObject, const Vector &vPosit
 
 		// NOTE: This can change the mass; so it must be done before max speed setting
 		Physgun_OnPhysGunPickup( pObject, pOwner, PICKED_UP_BY_CANNON );
+
+		// Give a slight camera shake to player towards up
+		pOwner->ViewPunch( QAngle(random->RandomFloat(-2.00f,-1.00f), random->RandomFloat(-0.75f,0.75f) ,0) );	
 	}
 
 	// NOTE :This must happen after OnPhysGunPickup because that can change the mass
@@ -2423,7 +2415,7 @@ bool CWeaponPhysCannon::AttachObject( CBaseEntity *pObject, const Vector &vPosit
 	{
 #if defined( WIN32 ) && !defined( _X360 )
 		// NVNT set the players constant force to simulate holding mass
-		HapticSetConstantForce(pOwner,clamp(m_grabController.GetLoadWeight()*0.05,1,5)*Vector(0,-1,0));
+		HapticSetConstantForce(pOwner,clamp(m_grabController.GetLoadWeight()*0.05f,1,5)*Vector(0,-1,0));
 #endif
 		pOwner->EnableSprint( false );
 
@@ -2579,7 +2571,7 @@ CWeaponPhysCannon::FindObjectResult_t CWeaponPhysCannon::FindObject( void )
 			return OBJECT_NOT_FOUND;
 		}
 	}
-
+	
 	// Check to see if the object is constrained + needs to be ripped off...
 	CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
 	if ( !Pickup_OnAttemptPhysGunPickup( pEntity, pOwner, PICKED_UP_BY_CANNON ) )
@@ -2593,10 +2585,8 @@ CWeaponPhysCannon::FindObjectResult_t CWeaponPhysCannon::FindObject( void )
 	if ( !bPull )
 		return OBJECT_NOT_FOUND;
 
-	// FIXME: This needs to be run through the CanPickupObject logic
+	// We ensued that object has a physics body in CanPickupObject logic
 	IPhysicsObject *pObj = pEntity->VPhysicsGetObject();
-	if ( !pObj )
-		return OBJECT_NOT_FOUND;
 
 	// If we're too far, simply start to pull the object towards us
 	Vector	pullDir = start - pEntity->WorldSpaceCenter();
@@ -2606,8 +2596,14 @@ CWeaponPhysCannon::FindObjectResult_t CWeaponPhysCannon::FindObject( void )
 	float mass = PhysGetEntityMass( pEntity );
 	if ( mass < 50.0f )
 	{
-		pullDir *= (mass + 0.5) * (1/50.0f);
+		pullDir *= (mass + 0.5f) * (1/50.0f);
 	}
+
+	// While pulling, apply a slight player camera shake (increased with distance to pulled object) to give gravity gun some weight
+	float shakeAmount = RemapValClamped(pEntity->WorldSpaceCenter().DistToSqr(start), 0.0f, testLength * testLength, 0.0f, 0.25f);
+	int randomXSign = SIGN(random->RandomInt(-1, 1));
+	int randomYSign = SIGN(random->RandomInt(-1, 1));
+	pPlayer->ViewPunch( QAngle(randomXSign * shakeAmount, randomYSign * shakeAmount ,0) );
 
 	// Nudge it towards us
 	pObj->ApplyForceCenter( pullDir );
@@ -2622,7 +2618,7 @@ CBaseEntity *CWeaponPhysCannon::MegaPhysCannonFindObjectInCone( const Vector &ve
 {
 	// Find the nearest physics-based item in a cone in front of me.
 	CBaseEntity *list[1024];
-	float flMaxDist = TraceLength() + 1.0;
+	float flMaxDist = TraceLength() + 1.0f;
 	float flNearestDist = flMaxDist;
 	bool bNearestIsCombineBall = bOnlyCombineBalls ? true : false;
 	Vector mins = vecOrigin - Vector( flNearestDist, flNearestDist, flNearestDist );
@@ -2691,7 +2687,7 @@ CBaseEntity *CWeaponPhysCannon::FindObjectInCone( const Vector &vecOrigin, const
 {
 	// Find the nearest physics-based item in a cone in front of me.
 	CBaseEntity *list[256];
-	float flNearestDist = physcannon_tracelength.GetFloat() + 1.0; //Use regular distance.
+	float flNearestDist = physcannon_tracelength.GetFloat() + 1.0f; //Use regular distance.
 	Vector mins = vecOrigin - Vector( flNearestDist, flNearestDist, flNearestDist );
 	Vector maxs = vecOrigin + Vector( flNearestDist, flNearestDist, flNearestDist );
 
@@ -2769,8 +2765,6 @@ bool CGrabController::UpdateObject( CBasePlayer *pPlayer, float flError )
 	{
 		playerAngles.x = clamp( pitch, -90, 75 );
 	}
-
-	
 	
 	// Now clamp a sphere of object radius at end to the player's bbox
 	Vector radial = physcollision->CollideGetExtent( pPhys->GetCollide(), vec3_origin, pEntity->GetAbsAngles(), -forward );
@@ -2778,7 +2772,7 @@ bool CGrabController::UpdateObject( CBasePlayer *pPlayer, float flError )
 	float playerRadius = player2d.Length2D();
 	float radius = playerRadius + fabs(DotProduct( forward, radial ));
 
-	float distance = 24 + ( radius * 2.0f );
+	float distance = 52 + ( radius * 2.0f );
 
 	// Add the prop's distance offset
 	distance += m_flDistanceOffset;
@@ -2846,7 +2840,12 @@ bool CGrabController::UpdateObject( CBasePlayer *pPlayer, float flError )
 	AngleMatrix( angles, attachedToWorld );
 	VectorRotate( m_attachedPositionObjectSpace, attachedToWorld, offset );
 
-	SetTargetPosition( end - offset, angles );
+	Vector currentPos;
+	QAngle currentAng;
+	const vec_t lerpSpeed = gpGlobals->frametime * 12;
+	pPhys->GetPosition(&currentPos, &currentAng);
+
+	SetTargetPosition( VectorLerp(currentPos, end - offset, lerpSpeed) , angles);
 
 	return true;
 }
@@ -2860,7 +2859,11 @@ void CWeaponPhysCannon::UpdateObject( void )
 	if ( !m_grabController.UpdateObject( pPlayer, flError ) )
 	{
 		DetachObject();
-		return;
+	}
+	else if(pPlayer != NULL)
+	{
+		// If we somehow still holding the object, shake player camera super slightly
+		pPlayer->ViewPunch( QAngle(random->RandomFloat(-0.025f,0.025f), random->RandomFloat(-0.025f,0.025f) ,0) );	
 	}
 }
 
@@ -2871,9 +2874,12 @@ void CWeaponPhysCannon::DetachObject( bool playSound, bool wasLaunched )
 	if ( m_bActive == false )
 		return;
 
-	CHL2_Player *pOwner = (CHL2_Player *)ToBasePlayer( GetOwner() );
+	CHL2_Player *pOwner = static_cast<CHL2_Player*>(ToBasePlayer(GetOwner()));
 	if( pOwner != NULL )
 	{
+		// Apply a slight camera shake towards bottom, make it feel like immediate detachment of the object made player struggle for a moment
+		pOwner->ViewPunch( QAngle(random->RandomFloat(1.00f,2.00f), random->RandomFloat(-0.75f,0.75f) ,0) );	
+		
 		pOwner->EnableSprint( true );
 		pOwner->SetMaxSpeed( hl2_normspeed.GetFloat() );
 		
@@ -3115,7 +3121,7 @@ void CWeaponPhysCannon::DoEffectIdle( void )
 			}
 #endif
 
-			CCitadelEnergyCore *pCore = static_cast<CCitadelEnergyCore*>( CreateEntityByName( "env_citadel_energy_core" ) );
+			CCitadelEnergyCore *pCore = dynamic_cast<CCitadelEnergyCore*>( CreateEntityByName( "env_citadel_energy_core" ) );
 
 			if ( pCore == NULL )
 				return;
@@ -3373,15 +3379,12 @@ void CWeaponPhysCannon::LaunchObject( const Vector &vecDir, float flForce )
 		// to scare potential targets
 		trace_t	tr;
 		Vector	vecStart = pObject->GetAbsOrigin();
-		Vector	vecSpot;
-		int		iLength;
-		int		i;
 
 		UTIL_TraceLine( vecStart, vecStart + vecDir * flForce, MASK_SHOT, pObject, COLLISION_GROUP_NONE, &tr );
-		iLength = ( tr.startpos - tr.endpos ).Length();
-		vecSpot = vecStart + vecDir * PHYSCANNON_DANGER_SOUND_RADIUS;
+		int iLength = (tr.startpos - tr.endpos).Length();
+		Vector vecSpot = vecStart + vecDir * PHYSCANNON_DANGER_SOUND_RADIUS;
 
-		for( i = PHYSCANNON_DANGER_SOUND_RADIUS ; i < iLength ; i += PHYSCANNON_DANGER_SOUND_RADIUS )
+		for( int i = PHYSCANNON_DANGER_SOUND_RADIUS ; i < iLength ; i += PHYSCANNON_DANGER_SOUND_RADIUS )
 		{
 			CSoundEnt::InsertSound( SOUND_PHYSICS_DANGER, vecSpot, PHYSCANNON_DANGER_SOUND_RADIUS, 0.5, pObject );
 			vecSpot = vecSpot + ( vecDir * PHYSCANNON_DANGER_SOUND_RADIUS );
@@ -3450,6 +3453,11 @@ bool CWeaponPhysCannon::CanPickupObject( CBaseEntity *pTarget )
 		CPhysicsProp *pPhysProp = dynamic_cast<CPhysicsProp*>(pTarget);
 		if ( pPhysProp != NULL )
 			return true;
+	}
+
+	if(pTarget->VPhysicsGetObject() == NULL)
+	{
+		return false;
 	}
 
 	if ( pTarget->IsEFlagSet( EFL_NO_PHYSCANNON_INTERACTION ) )
@@ -4154,12 +4162,12 @@ void CWeaponPhysCannon::DoMegaEffectLaunch( Vector *pos )
 			pBeam->PointEntInit( endpos, vm );
 			pBeam->SetEndAttachment( 1 );
 			pBeam->SetWidth( 2 );
-			pBeam->SetEndWidth( random->RandomInt( 1, 2 ) );
+			pBeam->SetEndWidth( random->RandomFloat( 1, 2 ) );
 			pBeam->SetBrightness( 255 );
 			pBeam->SetColor( 255, 255, 255 );
 			pBeam->LiveForTime( 0.1f );
 			pBeam->RelinkBeam();
-			pBeam->SetNoise( random->RandomInt( 8, 12 ) );
+			pBeam->SetNoise( random->RandomFloat( 8, 12 ) );
 		}
 	}
 	
@@ -4367,25 +4375,15 @@ const char *CWeaponPhysCannon::GetShootSound( int iIndex ) const
 	{
 	case EMPTY:
 		return "Weapon_MegaPhysCannon.DryFire";
-		break;
-
 	case SINGLE:
 		return "Weapon_MegaPhysCannon.Launch";
-		break;
-
 	case SPECIAL1:
 		return "Weapon_MegaPhysCannon.Pickup";
-		break;
-
 	case MELEE_MISS:
 		return "Weapon_MegaPhysCannon.Drop";
-		break;
-
 	default:
-		break;
+		return BaseClass::GetShootSound( iIndex );
 	}
-
-	return BaseClass::GetShootSound( iIndex );
 }
 
 //-----------------------------------------------------------------------------
@@ -4556,7 +4554,7 @@ CBaseEntity *PhysCannonGetHeldEntity( CBaseCombatWeapon *pActiveWeapon )
 CBaseEntity *GetPlayerHeldEntity( CBasePlayer *pPlayer )
 {
 	CBaseEntity *pObject = NULL;
-	CPlayerPickupController *pPlayerPickupController = (CPlayerPickupController *)(pPlayer->GetUseEntity());
+	CPlayerPickupController *pPlayerPickupController = static_cast<CPlayerPickupController*>(pPlayer->GetUseEntity());
 
 	if ( pPlayerPickupController )
 	{
