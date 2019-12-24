@@ -2016,7 +2016,6 @@ void CWeaponPhysCannon::PuntRagdoll( CBaseEntity *pEntity, const Vector &vecForw
 
 		for ( int j = 0; j < pRagdollPhys->listCount; ++j )
 		{
-			// TODO(doga): See if aVel is working well
 			pRagdollPhys->list[j].pObject->AddVelocity( &vVel, &aVel ); 
 		}
 	}
