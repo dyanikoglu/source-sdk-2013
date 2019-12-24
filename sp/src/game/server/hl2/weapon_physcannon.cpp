@@ -386,7 +386,7 @@ IPhysicsObject *GetRagdollChildAtPosition( CBaseEntity *pTarget, const Vector &p
 // Purpose: Computes a local matrix for the player clamped to valid carry ranges
 //-----------------------------------------------------------------------------
 // when looking level, hold bottom of object 8 inches below eye level
-#define PLAYER_HOLD_LEVEL_EYES	-8
+#define PLAYER_HOLD_LEVEL_EYES	(-8)
 
 // when looking down, hold bottom of object 0 inches from feet
 #define PLAYER_HOLD_DOWN_FEET	2
@@ -476,7 +476,7 @@ public:
 	QAngle TransformAnglesToPlayerSpace( const QAngle &anglesIn, CBasePlayer *pPlayer );
 	QAngle TransformAnglesFromPlayerSpace( const QAngle &anglesIn, CBasePlayer *pPlayer );
 
-	CBaseEntity *GetAttached() { return (CBaseEntity *)m_attachedEntity; }
+	CBaseEntity *GetAttached() { return static_cast<CBaseEntity*>(m_attachedEntity); }
 
 	IMotionEvent::simresult_e Simulate( IPhysicsMotionController *pController, IPhysicsObject *pObject, float deltaTime, Vector &linear, AngularImpulse &angular );
 	float GetSavedMass( IPhysicsObject *pObject );
@@ -1193,7 +1193,7 @@ void PlayerPickupObject( CBasePlayer *pPlayer, CBaseEntity *pObject )
 
 struct thrown_objects_t
 {
-	float				fTimeThrown;
+	float				fTimeThrown = 0.0f;
 	EHANDLE				hEntity;
 
 	DECLARE_SIMPLE_DATADESC();
@@ -1255,9 +1255,10 @@ public:
 protected:
 	enum FindObjectResult_t
 	{
-		OBJECT_FOUND = 0,
+		OBJECT_FOUND_PULL_PUNT = 0,
 		OBJECT_NOT_FOUND,
 		OBJECT_BEING_DETACHED,
+		OBJECT_FOUND_PUNT_ONLY
 	};
 
 	void	DoMegaEffect( int effectType, Vector *pos = NULL );
@@ -2299,7 +2300,7 @@ void CWeaponPhysCannon::SecondaryAttack( void )
 		FindObjectResult_t result = FindObject();
 		switch ( result )
 		{
-		case OBJECT_FOUND:
+		case OBJECT_FOUND_PULL_PUNT:
 			WeaponSound( SPECIAL1 );
 			SendWeaponAnim( ACT_VM_PRIMARYATTACK );
 			m_flNextSecondaryAttack = gpGlobals->curtime + 0.5f;
@@ -2314,11 +2315,16 @@ void CWeaponPhysCannon::SecondaryAttack( void )
 			break;
 
 		case OBJECT_BEING_DETACHED:
+		case OBJECT_FOUND_PUNT_ONLY:
 			m_flNextSecondaryAttack = gpGlobals->curtime + 0.01f;
 			break;
 		}
 
-		DoEffect( EFFECT_HOLDING );
+		// If we're only able to punt the object, do not give visual feedback for secondary attack input
+		if(result != OBJECT_FOUND_PUNT_ONLY)
+		{
+			DoEffect( EFFECT_HOLDING );
+		}
 	}
 }	
 
@@ -2387,7 +2393,7 @@ bool CWeaponPhysCannon::AttachObject( CBaseEntity *pObject, const Vector &vPosit
 	if ( !pPhysics )
 		return false;
 
-	CHL2_Player *pOwner = static_cast<CHL2_Player*>(ToBasePlayer(GetOwner()));
+	CHL2_Player *pOwner = dynamic_cast<CHL2_Player*>(ToBasePlayer(GetOwner()));
 
 	m_bActive = true;
 	if( pOwner )
@@ -2492,8 +2498,10 @@ CWeaponPhysCannon::FindObjectResult_t CWeaponPhysCannon::FindObject( void )
 	
 	Assert( pPlayer );
 	if ( pPlayer == NULL )
+	{
 		return OBJECT_NOT_FOUND;
-	
+	}
+
 	trace_t tr;
 	FindObjectTrace( pPlayer, &tr );
 	CBaseEntity *pEntity = tr.m_pEnt ? tr.m_pEnt->GetRootMoveParent() : NULL;
@@ -2568,22 +2576,27 @@ CWeaponPhysCannon::FindObjectResult_t CWeaponPhysCannon::FindObject( void )
 				WeaponSound( SPECIAL3 );
 			}
 
-			return OBJECT_NOT_FOUND;
+			// We can only punt this object, pulling is not allowed
+			return OBJECT_FOUND_PUNT_ONLY;
 		}
 	}
 	
 	// Check to see if the object is constrained + needs to be ripped off...
 	CBasePlayer *pOwner = ToBasePlayer( GetOwner() );
 	if ( !Pickup_OnAttemptPhysGunPickup( pEntity, pOwner, PICKED_UP_BY_CANNON ) )
+	{
 		return OBJECT_BEING_DETACHED;
-
+	}
+		
 	if ( bAttach )
 	{
-		return AttachObject( pEntity, tr.endpos ) ? OBJECT_FOUND : OBJECT_NOT_FOUND;
+		return AttachObject( pEntity, tr.endpos ) ? OBJECT_FOUND_PULL_PUNT : OBJECT_NOT_FOUND;
 	}
 
 	if ( !bPull )
+	{
 		return OBJECT_NOT_FOUND;
+	}
 
 	// We ensued that object has a physics body in CanPickupObject logic
 	IPhysicsObject *pObj = pEntity->VPhysicsGetObject();
@@ -2603,7 +2616,7 @@ CWeaponPhysCannon::FindObjectResult_t CWeaponPhysCannon::FindObject( void )
 	float shakeAmount = RemapValClamped(pEntity->WorldSpaceCenter().DistToSqr(start), 0.0f, testLength * testLength, 0.0f, 0.25f);
 	int randomXSign = SIGN(random->RandomInt(-1, 1));
 	int randomYSign = SIGN(random->RandomInt(-1, 1));
-	pPlayer->ViewPunch( QAngle(randomXSign * shakeAmount, randomYSign * shakeAmount ,0) );
+	pPlayer->ViewPunch( QAngle(static_cast<float>(randomXSign) * shakeAmount, static_cast<float>(randomYSign) * shakeAmount ,0) );
 
 	// Nudge it towards us
 	pObj->ApplyForceCenter( pullDir );
@@ -2991,9 +3004,7 @@ void CWeaponPhysCannon::CheckForTarget( void )
 		float dist = (tr.endpos - tr.startpos).Length();
 		if ( dist <= TraceLength() )
 		{
-			// FIXME: Try just having the elements always open when pointed at a physics object
-			if ( CanPickupObject( tr.m_pEnt ) || Pickup_ForcePhysGunOpen( tr.m_pEnt, pOwner ) )
-			// if ( ( tr.m_pEnt->VPhysicsGetObject() != NULL ) && ( tr.m_pEnt->GetMoveType() == MOVETYPE_VPHYSICS ) )
+			if ( tr.m_pEnt->VPhysicsGetObject() != NULL && tr.m_pEnt->GetMoveType() == MOVETYPE_VPHYSICS )
 			{
 				m_nChangeState = ELEMENT_STATE_NONE;
 				OpenElements();
@@ -4444,11 +4455,7 @@ void CWeaponPhysCannon::PurgeThrownObjects()
 		{
 			bool bRemove = false;
 
-			if( !m_ThrownEntities[i].hEntity.Get() )
-			{
-				bRemove = true;
-			}
-			else if( gpGlobals->curtime > (m_ThrownEntities[i].fTimeThrown + PHYSCANNON_THROWN_LIST_TIMEOUT) )
+			if( !m_ThrownEntities[i].hEntity.Get() || gpGlobals->curtime > m_ThrownEntities[i].fTimeThrown + PHYSCANNON_THROWN_LIST_TIMEOUT )
 			{
 				bRemove = true;
 			}
@@ -4554,7 +4561,7 @@ CBaseEntity *PhysCannonGetHeldEntity( CBaseCombatWeapon *pActiveWeapon )
 CBaseEntity *GetPlayerHeldEntity( CBasePlayer *pPlayer )
 {
 	CBaseEntity *pObject = NULL;
-	CPlayerPickupController *pPlayerPickupController = static_cast<CPlayerPickupController*>(pPlayer->GetUseEntity());
+	CPlayerPickupController *pPlayerPickupController = dynamic_cast<CPlayerPickupController*>(pPlayer->GetUseEntity());
 
 	if ( pPlayerPickupController )
 	{
