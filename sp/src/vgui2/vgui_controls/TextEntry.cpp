@@ -2801,7 +2801,7 @@ int TextEntry::GetCurrentLineEnd()
 		if (!_cursorIsAtEnd)
 		{
 			if (i == m_LineBreaks.Count()-2 )
-				m_TextStream.Count();		
+				return m_TextStream.Count();		
 			else
 				return m_LineBreaks[i+1];
 		}
