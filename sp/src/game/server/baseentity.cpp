@@ -3323,7 +3323,7 @@ int CBaseEntity::RestoreDataDescBlock( IRestore &restore, datamap_t *dmap )
 
 bool CBaseEntity::ShouldSavePhysics()
 {
-	return true;
+	return false;
 }
 
 //-----------------------------------------------------------------------------
